@@ -1,0 +1,43 @@
+name: Build site
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WebAssembly
+        run: wasm-pack build --target web
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp index.html site/
+          cp -r pkg site/pkg
+
+      - name: Check site contents
+        run: |
+          test -f site/index.html
+          test -f site/pkg/game_of_life.js
+          test -f site/pkg/game_of_life_bg.wasm
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
