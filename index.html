@@ -18,5 +18,11 @@
 <body>
   <h1>Conway's Game of Life</h1>
   <p>A Game of Life implementation in Rust.</p>
+  <p id="greeting">Loading…</p>
+  <script type="module">
+    import init, { greet } from "./pkg/game_of_life.js";
+    await init();
+    document.getElementById("greeting").textContent = "Rust says: " + greet();
+  </script>
 </body>
 </html>
