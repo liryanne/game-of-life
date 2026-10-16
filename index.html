@@ -66,17 +66,12 @@
     button:hover {
       background: #332012;
     }
-
-    button:focus-visible {
-      outline: 2px solid #ffc15a;
-      outline-offset: 3px;
-    }
   </style>
 </head>
 
 <body>
   <h1>Conway's Game of Life</h1>
-  <p>Desenhe células, crie padrões e observe sua evolução.</p>
+  <p>Desenhe células e observe sua evolução.</p>
 
   <div id="stats" aria-live="polite">
     Geração: <span id="generation">0</span>
@@ -99,14 +94,15 @@
     <button id="glider" type="button">Reset glider</button>
   </div>
 
-  <script>
+  <script type="module">
+    import init, { Universe } from "./pkg/game_of_life.js";
+
     const canvas = document.getElementById("grid");
     const ctx = canvas.getContext("2d");
 
     const countDisplay = document.getElementById("count");
     const generationDisplay = document.getElementById("generation");
     const startButton = document.getElementById("start");
-    const stepButton = document.getElementById("step");
 
     const cellSize = 5;
     const gap = 2;
@@ -115,144 +111,13 @@
     const columns = Math.floor(canvas.width / stepSize);
     const rows = Math.floor(canvas.height / stepSize);
 
-    let cells = new Set();
+    let universe;
     let generation = 0;
     let running = false;
     let timer = null;
     let drawing = false;
     let drawState = true;
     let lastCell = "";
-
-    function key(x, y) {
-      return `${x},${y}`;
-    }
-
-    function setCell(x, y, alive) {
-      const id = key(x, y);
-
-      if (alive) {
-        cells.add(id);
-      } else {
-        cells.delete(id);
-      }
-    }
-
-    function loadGlider() {
-      stopSimulation();
-      cells.clear();
-
-      const startX = Math.floor(columns / 2);
-      const startY = Math.floor(rows / 2);
-
-      [
-        [1, 0],
-        [2, 1],
-        [0, 2],
-        [1, 2],
-        [2, 2]
-      ].forEach(([x, y]) => {
-        setCell(startX + x, startY + y, true);
-      });
-
-      generation = 0;
-      render();
-    }
-
-    function render() {
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      for (const id of cells) {
-        const [x, y] = id.split(",").map(Number);
-
-        ctx.fillStyle = (x + y) % 3 === 0
-          ? "#ffc15a"
-          : "#e9822b";
-
-        ctx.fillRect(
-          x * stepSize,
-          y * stepSize,
-          cellSize,
-          cellSize
-        );
-      }
-
-      countDisplay.textContent = cells.size;
-      generationDisplay.textContent = generation;
-    }
-
-    function liveNeighbors(x, y) {
-      let count = 0;
-
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-
-          const nx = x + dx;
-          const ny = y + dy;
-
-          if (
-            nx >= 0 && nx < columns &&
-            ny >= 0 && ny < rows &&
-            cells.has(key(nx, ny))
-          ) {
-            count++;
-          }
-        }
-      }
-
-      return count;
-    }
-
-    function nextGeneration() {
-      const next = new Set();
-
-      // Só precisamos avaliar células vivas e suas vizinhas.
-      const candidates = new Set();
-
-      for (const id of cells) {
-        const [x, y] = id.split(",").map(Number);
-
-        candidates.add(key(x, y));
-
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-
-            if (
-              nx >= 0 && nx < columns &&
-              ny >= 0 && ny < rows
-            ) {
-              candidates.add(key(nx, ny));
-            }
-          }
-        }
-      }
-
-      for (const id of candidates) {
-        const [x, y] = id.split(",").map(Number);
-        const neighbors = liveNeighbors(x, y);
-        const alive = cells.has(id);
-
-        if (neighbors === 3 || (alive && neighbors === 2)) {
-          next.add(id);
-        }
-      }
-
-      cells = next;
-      generation++;
-      render();
-    }
-
-    function startSimulation() {
-      if (running) return;
-
-      running = true;
-      startButton.textContent = "Pause";
-
-      timer = setInterval(nextGeneration, 200);
-    }
 
     function stopSimulation() {
       running = false;
@@ -262,6 +127,60 @@
         clearInterval(timer);
         timer = null;
       }
+    }
+
+    function getCells() {
+      const pointer = universe.cells_ptr();
+      const length = universe.width() * universe.height();
+
+      return new Uint8Array(
+        wasmMemory.buffer,
+        pointer,
+        length
+      );
+    }
+
+    let wasmMemory;
+
+    function render() {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const memoryView = getCells();
+
+      let aliveCount = 0;
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < columns; x++) {
+          const index = y * columns + x;
+
+          if (memoryView[index] !== 1) {
+            continue;
+          }
+
+          aliveCount++;
+
+          ctx.fillStyle = (x + y) % 3 === 0
+            ? "#ffc15a"
+            : "#e9822b";
+
+          ctx.fillRect(
+            x * stepSize,
+            y * stepSize,
+            cellSize,
+            cellSize
+          );
+        }
+      }
+
+      countDisplay.textContent = aliveCount;
+      generationDisplay.textContent = generation;
+    }
+
+    function nextGeneration() {
+      universe.tick();
+      generation++;
+      render();
     }
 
     function getCell(event) {
@@ -288,11 +207,12 @@
       const cell = getCell(event);
       if (!cell) return;
 
-      const id = key(cell.x, cell.y);
-      if (id === lastCell) return;
+      const id = `${cell.x},${cell.y}`;
 
+      if (id === lastCell) return;
       lastCell = id;
-      setCell(cell.x, cell.y, drawState);
+
+      universe.set_cell(cell.y, cell.x, drawState);
       render();
     }
 
@@ -304,7 +224,10 @@
 
       event.preventDefault();
 
-      drawState = !cells.has(key(cell.x, cell.y));
+      const memoryView = getCells();
+      const index = cell.y * columns + cell.x;
+
+      drawState = memoryView[index] !== 1;
       drawing = true;
       lastCell = "";
 
@@ -328,40 +251,54 @@
       if (running) {
         stopSimulation();
       } else {
-        startSimulation();
+        running = true;
+        startButton.textContent = "Pause";
+        timer = setInterval(nextGeneration, 200);
       }
     });
 
-    stepButton.addEventListener("click", () => {
+    document.getElementById("step").addEventListener("click", () => {
       if (!running) nextGeneration();
     });
 
     document.getElementById("clear").addEventListener("click", () => {
       stopSimulation();
-      cells.clear();
+      universe.clear();
       generation = 0;
       render();
     });
 
-    document.getElementById("glider").addEventListener("click", loadGlider);
+    document.getElementById("glider").addEventListener("click", () => {
+      stopSimulation();
+      universe.reset_glider();
+      generation = 0;
+      render();
+    });
 
     document.getElementById("randomize").addEventListener("click", () => {
       stopSimulation();
-      cells.clear();
+      universe.randomize();
       generation = 0;
-
-      for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < columns; x++) {
-          if (Math.random() < 0.22) {
-            setCell(x, y, true);
-          }
-        }
-      }
-
       render();
     });
 
-    loadGlider();
+    async function main() {
+      const wasm = await init();
+      wasmMemory = wasm.memory;
+
+      universe = new Universe(columns, rows);
+      universe.reset_glider();
+
+      render();
+    }
+
+    main().catch((error) => {
+      console.error("Failed to initialize WebAssembly:", error);
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        "<p>Não foi possível carregar o módulo WebAssembly.</p>"
+      );
+    });
   </script>
 </body>
 </html>
