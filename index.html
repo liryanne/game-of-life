@@ -12,9 +12,9 @@
 
     body {
       margin: 0;
-      padding: 24px 16px;
+      padding: 24px 12px;
       background: #050505;
-      color: #d6d6d6;
+      color: #eee;
       font-family: Arial, sans-serif;
       text-align: center;
     }
@@ -22,13 +22,16 @@
     h1 {
       font-size: 22px;
       font-weight: 400;
-      margin-bottom: 8px;
     }
 
     p {
-      color: #888;
+      color: #999;
       font-size: 14px;
-      margin-bottom: 24px;
+    }
+
+    #stats {
+      margin: 18px 0;
+      color: #f5a34d;
     }
 
     canvas {
@@ -40,12 +43,19 @@
       background: #000;
       cursor: crosshair;
       image-rendering: pixelated;
-      touch-action: manipulation;
+      touch-action: none;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 20px auto;
     }
 
     button {
-      margin-top: 20px;
-      padding: 10px 18px;
+      padding: 10px 16px;
       border: 1px solid #a65b20;
       background: #17110c;
       color: #f5a34d;
@@ -53,7 +63,7 @@
       cursor: pointer;
     }
 
-    button:active {
+    button:hover {
       background: #332012;
     }
   </style>
@@ -61,21 +71,29 @@
 
 <body>
   <h1>Conway's Game of Life</h1>
-  <p>Click or tap the cells to create your own patterns.</p>
+  <p>Toque ou arraste para desenhar células.</p>
+
+  <div id="stats" aria-live="polite">
+    Células vivas: <span id="count">5</span>
+  </div>
 
   <canvas
     id="grid"
     width="900"
     height="450"
-    aria-label="Interactive Game of Life grid"
+    aria-label="Tabuleiro interativo do Game of Life"
   ></canvas>
 
-  <button id="clear">Clear grid</button>
+  <div class="controls">
+    <button id="randomize" type="button">Randomize</button>
+    <button id="clear" type="button">Clear</button>
+    <button id="glider" type="button">Reset glider</button>
+  </div>
 
   <script>
     const canvas = document.getElementById("grid");
     const ctx = canvas.getContext("2d");
-    const clearButton = document.getElementById("clear");
+    const countDisplay = document.getElementById("count");
 
     const cellSize = 5;
     const gap = 2;
@@ -84,70 +102,150 @@
     const columns = Math.floor(canvas.width / step);
     const rows = Math.floor(canvas.height / step);
 
-    const cells = new Set([
-      "20,20",
-      "21,21",
-      "19,22",
-      "20,22",
-      "21,22"
-    ]);
+    const cells = new Set();
+    let drawing = false;
+    let drawState = true;
+    let lastCell = "";
 
-    function drawCell(x, y) {
-      const color = Math.random() > 0.5
-        ? "#ff9d42"
-        : "#d97725";
+    function key(x, y) {
+      return `${x},${y}`;
+    }
 
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        x * step,
-        y * step,
-        cellSize,
-        cellSize
-      );
+    function setCell(x, y, alive) {
+      const id = key(x, y);
+
+      if (alive) {
+        cells.add(id);
+      } else {
+        cells.delete(id);
+      }
+    }
+
+    function loadGlider() {
+      cells.clear();
+
+      const startX = Math.floor(columns / 2);
+      const startY = Math.floor(rows / 2);
+
+      [
+        [1, 0],
+        [2, 1],
+        [0, 2],
+        [1, 2],
+        [2, 2]
+      ].forEach(([x, y]) => {
+        setCell(startX + x, startY + y, true);
+      });
+
+      render();
     }
 
     function render() {
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      for (const key of cells) {
-        const [x, y] = key.split(",").map(Number);
-        drawCell(x, y);
+      for (const id of cells) {
+        const [x, y] = id.split(",").map(Number);
+
+        ctx.fillStyle = (x + y) % 3 === 0
+          ? "#ffc15a"
+          : "#e9822b";
+
+        ctx.fillRect(
+          x * step,
+          y * step,
+          cellSize,
+          cellSize
+        );
       }
+
+      countDisplay.textContent = cells.size;
     }
 
-    canvas.addEventListener("click", (event) => {
+    function getCell(event) {
       const rect = canvas.getBoundingClientRect();
 
       const x = Math.floor(
-        (event.clientX - rect.left) * canvas.width / rect.width / step
+        (event.clientX - rect.left) * canvas.width /
+        rect.width / step
       );
 
       const y = Math.floor(
-        (event.clientY - rect.top) * canvas.height / rect.height / step
+        (event.clientY - rect.top) * canvas.height /
+        rect.height / step
       );
 
       if (x < 0 || x >= columns || y < 0 || y >= rows) {
-        return;
+        return null;
       }
 
-      const key = `${x},${y}`;
+      return { x, y };
+    }
 
-      if (cells.has(key)) {
-        cells.delete(key);
-      } else {
-        cells.add(key);
-      }
+    function paint(event) {
+      const cell = getCell(event);
 
+      if (!cell) return;
+
+      const id = key(cell.x, cell.y);
+
+      if (id === lastCell) return;
+
+      lastCell = id;
+      setCell(cell.x, cell.y, drawState);
       render();
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      const cell = getCell(event);
+
+      if (!cell) return;
+
+      event.preventDefault();
+
+      const id = key(cell.x, cell.y);
+      drawState = !cells.has(id);
+      drawing = true;
+      lastCell = "";
+
+      canvas.setPointerCapture(event.pointerId);
+      paint(event);
     });
 
-    clearButton.addEventListener("click", () => {
+    canvas.addEventListener("pointermove", (event) => {
+      if (drawing) paint(event);
+    });
+
+    function stopDrawing() {
+      drawing = false;
+      lastCell = "";
+    }
+
+    canvas.addEventListener("pointerup", stopDrawing);
+    canvas.addEventListener("pointercancel", stopDrawing);
+
+    document.getElementById("clear").addEventListener("click", () => {
       cells.clear();
       render();
     });
 
-    render();
+    document.getElementById("glider").addEventListener("click", loadGlider);
+
+    document.getElementById("randomize").addEventListener("click", () => {
+      cells.clear();
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < columns; x++) {
+          if (Math.random() < 0.22) {
+            setCell(x, y, true);
+          }
+        }
+      }
+
+      render();
+    });
+
+    loadGlider();
   </script>
 </body>
 </html>
