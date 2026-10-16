@@ -12,9 +12,9 @@
 
     body {
       margin: 0;
-      padding: 24px 16px;
+      padding: 24px 12px;
       background: #050505;
-      color: #d6d6d6;
+      color: #eee;
       font-family: Arial, sans-serif;
       text-align: center;
     }
@@ -22,13 +22,16 @@
     h1 {
       font-size: 22px;
       font-weight: 400;
-      margin-bottom: 8px;
     }
 
     p {
-      color: #888;
+      color: #999;
       font-size: 14px;
-      margin-bottom: 24px;
+    }
+
+    #stats {
+      margin: 18px 0;
+      color: #f5a34d;
     }
 
     canvas {
@@ -40,12 +43,19 @@
       background: #000;
       cursor: crosshair;
       image-rendering: pixelated;
-      touch-action: manipulation;
+      touch-action: none;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 20px auto;
     }
 
     button {
-      margin-top: 20px;
-      padding: 10px 18px;
+      padding: 10px 16px;
       border: 1px solid #a65b20;
       background: #17110c;
       color: #f5a34d;
@@ -53,7 +63,7 @@
       cursor: pointer;
     }
 
-    button:active {
+    button:hover {
       background: #332012;
     }
   </style>
@@ -61,87 +71,234 @@
 
 <body>
   <h1>Conway's Game of Life</h1>
-  <p>Click or tap the cells to create your own patterns.</p>
+  <p>Desenhe células e observe sua evolução.</p>
+
+  <div id="stats" aria-live="polite">
+    Geração: <span id="generation">0</span>
+    &nbsp;|&nbsp;
+    Células vivas: <span id="count">5</span>
+  </div>
 
   <canvas
     id="grid"
     width="900"
     height="450"
-    aria-label="Interactive Game of Life grid"
+    aria-label="Tabuleiro interativo do Game of Life"
   ></canvas>
 
-  <button id="clear">Clear grid</button>
+  <div class="controls">
+    <button id="start" type="button">Start</button>
+    <button id="step" type="button">Step</button>
+    <button id="randomize" type="button">Randomize</button>
+    <button id="clear" type="button">Clear</button>
+    <button id="glider" type="button">Reset glider</button>
+  </div>
 
-  <script>
+  <script type="module">
+    import init, { Universe } from "./pkg/game_of_life.js";
+
     const canvas = document.getElementById("grid");
     const ctx = canvas.getContext("2d");
-    const clearButton = document.getElementById("clear");
+
+    const countDisplay = document.getElementById("count");
+    const generationDisplay = document.getElementById("generation");
+    const startButton = document.getElementById("start");
 
     const cellSize = 5;
     const gap = 2;
-    const step = cellSize + gap;
+    const stepSize = cellSize + gap;
 
-    const columns = Math.floor(canvas.width / step);
-    const rows = Math.floor(canvas.height / step);
+    const columns = Math.floor(canvas.width / stepSize);
+    const rows = Math.floor(canvas.height / stepSize);
 
-    const cells = new Set();
+    let universe;
+    let generation = 0;
+    let running = false;
+    let timer = null;
+    let drawing = false;
+    let drawState = true;
+    let lastCell = "";
 
-    function drawCell(x, y) {
-      const color = Math.random() > 0.5
-        ? "#ff9d42"
-        : "#d97725";
+    function stopSimulation() {
+      running = false;
+      startButton.textContent = "Start";
 
-      ctx.fillStyle = color;
-      ctx.fillRect(
-        x * step,
-        y * step,
-        cellSize,
-        cellSize
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+
+    function getCells() {
+      const pointer = universe.cells_ptr();
+      const length = universe.width() * universe.height();
+
+      return new Uint8Array(
+        wasmMemory.buffer,
+        pointer,
+        length
       );
     }
+
+    let wasmMemory;
 
     function render() {
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      for (const key of cells) {
-        const [x, y] = key.split(",").map(Number);
-        drawCell(x, y);
+      const memoryView = getCells();
+
+      let aliveCount = 0;
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < columns; x++) {
+          const index = y * columns + x;
+
+          if (memoryView[index] !== 1) {
+            continue;
+          }
+
+          aliveCount++;
+
+          ctx.fillStyle = (x + y) % 3 === 0
+            ? "#ffc15a"
+            : "#e9822b";
+
+          ctx.fillRect(
+            x * stepSize,
+            y * stepSize,
+            cellSize,
+            cellSize
+          );
+        }
       }
+
+      countDisplay.textContent = aliveCount;
+      generationDisplay.textContent = generation;
     }
 
-    canvas.addEventListener("click", (event) => {
+    function nextGeneration() {
+      universe.tick();
+      generation++;
+      render();
+    }
+
+    function getCell(event) {
       const rect = canvas.getBoundingClientRect();
 
       const x = Math.floor(
-        (event.clientX - rect.left) * canvas.width / rect.width / step
+        (event.clientX - rect.left) *
+        canvas.width / rect.width / stepSize
       );
 
       const y = Math.floor(
-        (event.clientY - rect.top) * canvas.height / rect.height / step
+        (event.clientY - rect.top) *
+        canvas.height / rect.height / stepSize
       );
 
       if (x < 0 || x >= columns || y < 0 || y >= rows) {
-        return;
+        return null;
       }
 
-      const key = `${x},${y}`;
+      return { x, y };
+    }
 
-      if (cells.has(key)) {
-        cells.delete(key);
+    function paint(event) {
+      const cell = getCell(event);
+      if (!cell) return;
+
+      const id = `${cell.x},${cell.y}`;
+
+      if (id === lastCell) return;
+      lastCell = id;
+
+      universe.set_cell(cell.y, cell.x, drawState);
+      render();
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      if (running) return;
+
+      const cell = getCell(event);
+      if (!cell) return;
+
+      event.preventDefault();
+
+      const memoryView = getCells();
+      const index = cell.y * columns + cell.x;
+
+      drawState = memoryView[index] !== 1;
+      drawing = true;
+      lastCell = "";
+
+      canvas.setPointerCapture(event.pointerId);
+      paint(event);
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (drawing) paint(event);
+    });
+
+    function stopDrawing() {
+      drawing = false;
+      lastCell = "";
+    }
+
+    canvas.addEventListener("pointerup", stopDrawing);
+    canvas.addEventListener("pointercancel", stopDrawing);
+
+    startButton.addEventListener("click", () => {
+      if (running) {
+        stopSimulation();
       } else {
-        cells.add(key);
+        running = true;
+        startButton.textContent = "Pause";
+        timer = setInterval(nextGeneration, 200);
       }
+    });
 
+    document.getElementById("step").addEventListener("click", () => {
+      if (!running) nextGeneration();
+    });
+
+    document.getElementById("clear").addEventListener("click", () => {
+      stopSimulation();
+      universe.clear();
+      generation = 0;
       render();
     });
 
-    clearButton.addEventListener("click", () => {
-      cells.clear();
+    document.getElementById("glider").addEventListener("click", () => {
+      stopSimulation();
+      universe.reset_glider();
+      generation = 0;
       render();
     });
 
-    render();
+    document.getElementById("randomize").addEventListener("click", () => {
+      stopSimulation();
+      universe.randomize();
+      generation = 0;
+      render();
+    });
+
+    async function main() {
+      const wasm = await init();
+      wasmMemory = wasm.memory;
+
+      universe = new Universe(columns, rows);
+      universe.reset_glider();
+
+      render();
+    }
+
+    main().catch((error) => {
+      console.error("Failed to initialize WebAssembly:", error);
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        "<p>Não foi possível carregar o módulo WebAssembly.</p>"
+      );
+    });
   </script>
 </body>
 </html>
