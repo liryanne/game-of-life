@@ -18,5 +18,16 @@
 <body>
   <h1>Conway's Game of Life</h1>
   <p>A Game of Life implementation in Rust.</p>
+  <p id="wasm-status">Loading WebAssembly…</p>
+  <script type="module">
+    import init, { greet } from "./pkg/game_of_life.js";
+    const status = document.getElementById("wasm-status");
+    try {
+      await init();
+      status.textContent = "✅ Rust says: " + greet();
+    } catch (e) {
+      status.textContent = "❌ Failed to load WebAssembly: " + e;
+    }
+  </script>
 </body>
 </html>

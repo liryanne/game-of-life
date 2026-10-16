@@ -21,6 +21,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WebAssembly
+        run: wasm-pack build --release --target web
+
+      - name: Assemble site
+        run: |
+          mkdir site
+          cp index.html site/
+          mkdir site/pkg
+          cp pkg/game_of_life.js pkg/game_of_life_bg.wasm site/pkg/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
@@ -29,7 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
